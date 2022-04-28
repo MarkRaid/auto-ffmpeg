@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -96,12 +97,10 @@ next_event:
 	}
 }
 
-
 func IsAmediaFile(fn string) bool {
 	var amediaRE = regexp.MustCompile(`^(?P<name>.*?)(_s(?P<season>\d{2}))?(e(?P<episode>\d{2,4}))?_(?P<type>MOV|SER|SPO)_(?P<id>\d*)(\.RUS)?(_R(?P<replace>\d))?(\.RUS)?\.(?P<ext>srt|mp4)$`)
 	return amediaRE.MatchString(path.Base(fn))
 }
-
 
 func IsTRL(fn string) bool {
 	if GetDuration(fn) >= 6*60 {
@@ -116,7 +115,6 @@ func IsTRL(fn string) bool {
 
 	return true
 }
-
 
 func IsAllAudioChannelsMixed(info *ffinfo.File) bool {
 	audioCount := 0
@@ -138,7 +136,6 @@ func IsAllAudioChannelsMixed(info *ffinfo.File) bool {
 	return true
 }
 
-
 func GetVideoStream(streams []ffinfo.Stream) *ffinfo.Stream {
 	for _, stream := range streams {
 		if stream.CodecType == "video" {
@@ -148,7 +145,6 @@ func GetVideoStream(streams []ffinfo.Stream) *ffinfo.Stream {
 
 	return nil
 }
-
 
 func GetDuration(fn string) float64 {
 	info, err := ffinfo.Probe(fn)
@@ -163,7 +159,6 @@ func GetDuration(fn string) float64 {
 	return number
 }
 
-
 func GetAllAudioStreams(info *ffinfo.File) []ffinfo.Stream {
 	audioStreams := make([]ffinfo.Stream, 0, 0)
 
@@ -176,10 +171,7 @@ func GetAllAudioStreams(info *ffinfo.File) []ffinfo.Stream {
 	return audioStreams
 }
 
-
-func GetAudioFileNameChannelsPart(audioStream *ffinfo.Stream) string {
-	var audioFileNameChannelsPart string
-
+func GetAudioFileNameChannelsPart(audioStream *ffinfo.Stream) (audioFileNameChannelsPart string) {
 	switch audioStream.ChannelLayout {
 	case "stereo":
 		audioFileNameChannelsPart = "20"
@@ -192,12 +184,12 @@ func GetAudioFileNameChannelsPart(audioStream *ffinfo.Stream) string {
 				audioFileNameChannelsPart = "20"
 			case 6:
 				audioFileNameChannelsPart = "51"
+			}
 		}
 	}
 
-	return audioFileNameChannelsPart
+	return
 }
-
 
 func ProcessMovie(srcPath string, movieLock *sync.Mutex) {
 	info, err := ffinfo.Probe(srcPath)
@@ -252,38 +244,26 @@ func ProcessMovie(srcPath string, movieLock *sync.Mutex) {
 	}
 }
 
-
 type TrlUserInput struct {
-	name     string
+	name string
 }
-
 
 type UserInputRequestMsgGroup struct {
 	statusMsgId    int
 	photosGroupIDs []int
 }
 
-
-func NewUserInputRequestMsgGroup() {
-	return UserInputRequestMsgGroup{
-		statusMsgId: 0
-		photosGroupIDs: make([]int)
-	}
-}
-
-
 type tgBot struct {
-	channel    	 tele.ChatID
-	tgApi        *tele.Bot
-	requests     map[string]UserInputRequestMsgGroup
+	channel  tele.ChatID
+	tgApi    *tele.Bot
+	requests map[string]UserInputRequestMsgGroup
 }
-
 
 func NewTgBot() *tgBot {
 	tgApi, err := tele.NewBot(tele.Settings{
-		Token:  os.Getenv("TOKEN"),
+		Token: os.Getenv("TOKEN"),
 		Poller: &tele.LongPoller{
-			Timeout: 10 * time.Second
+			Timeout: 10 * time.Second,
 		},
 	})
 
@@ -292,16 +272,15 @@ func NewTgBot() *tgBot {
 	}
 
 	bot := &tgBot{
-		channel:   tele.ChatID(-1001675392122),
-		tgApi:     &tgApi,
-		requests:  make(map[string]UserInputRequestMsgGroup)
+		channel:  tele.ChatID(-1001675392122),
+		tgApi:    tgApi,
+		requests: make(map[string]UserInputRequestMsgGroup),
 	}
 
 	// go bot.updateGorutine()
 
 	return bot
 }
-
 
 // func (self *tgBot) updateGorutine() {
 // 	u := tgbotapi.NewUpdate(0)
@@ -331,20 +310,22 @@ func NewTgBot() *tgBot {
 // 		delete(self.awaitResolution, update.ChannelPost.ReplyToMessage.MessageID)
 
 // 		self.botApi.Send(tgbotapi.NewDeleteMessage(
-// 			self.chatID,
+// 			self.channel,
 // 			update.ChannelPost.ReplyToMessage.MessageID,
 // 		))
 
 // 		self.botApi.Send(tgbotapi.NewDeleteMessage(
-// 			self.chatID,
+// 			self.channel,
 // 			update.ChannelPost.MessageID,
 // 		))
 // 	}
 // }
 
-
 func (self *tgBot) requestTRL(fileName string) {
-	bot.requests[fileName] := UserInputRequestMsgGroup{}
+	self.requests[fileName] = UserInputRequestMsgGroup{
+		statusMsgId:    0,
+		photosGroupIDs: make([]int, 0),
+	}
 	userInput := TrlUserInput{}
 
 	requestMsg := fmt.Sprintf("❓ %s", fileName)
@@ -352,20 +333,20 @@ func (self *tgBot) requestTRL(fileName string) {
 	inMove := fmt.Sprintf("📤 %s", fileName)
 	finishMsg := fmt.Sprintf("✅ %s", fileName)
 
-	msg, err := self.tgApi.Send(
-		self.chatID,
+	titleMsg, err := self.tgApi.Send(
+		self.channel,
 		requestMsg,
 	)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	bot.requests[fileName].statusMsgId = msg.ID
+	self.requests[fileName].statusMsgId = titleMsg.ID
 
 	// Отправляем 3 группы фотографий
 	album := NewScreenshotAlbum(fileName, 5, "0", "10")
 
-	msg, err = self.tgApi.SendAlbum(
+	_, err = self.tgApi.SendAlbum(
 		self.channel,
 		album,
 	)
@@ -374,25 +355,25 @@ func (self *tgBot) requestTRL(fileName string) {
 		log.Panic(err)
 	}
 
-	bot.requests[fileName].photosGroupIDs = append(
-		bot.requests[fileName].photosGroupIDs,
-		msg.ID,
-	)
+	// self.requests[fileName].photosGroupIDs = append(
+	// 	self.requests[fileName].photosGroupIDs,
+	// 	albumMsg.ID,
+	// )
 
 	// Отправляем всё аудио, которое есть
 	// Отправляем панель с действиями
 }
 
 func NewScreenshotAlbum(filePath string, count int, ss, to string) tele.Album {
-	album := make(tele.Album)
+	var album tele.Album
 
 	l, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-	    panic(err)
+		panic(err)
 	}
 	defer l.Close()
 
-	for i := 1;  i <= count; i++ {
+	for i := 1; i <= count; i++ {
 		cmd := exec.Command(
 			"ffmpeg",
 			"-hide_banner",
@@ -423,11 +404,11 @@ func NewScreenshotAlbum(filePath string, count int, ss, to string) tele.Album {
 			log.Fatalf("cmd.Run() failed with %s\n", err)
 		}
 
-	    c, err := l.Accept()
+		c, err := l.Accept()
 
-	    if err != nil {
-	        panic(err)
-	    }
+		if err != nil {
+			panic(err)
+		}
 
 		album = append(
 			album,
@@ -437,7 +418,6 @@ func NewScreenshotAlbum(filePath string, count int, ss, to string) tele.Album {
 
 	return album
 }
-
 
 func ProcessTrl(srcPath string, bot *tgBot, trlLock *sync.Mutex) {
 	info, err := ffinfo.Probe(srcPath)
@@ -482,7 +462,9 @@ func ProcessTrl(srcPath string, bot *tgBot, trlLock *sync.Mutex) {
 
 	// Там один или несколько 5.1 или 2.0 стримов
 
-	// audioFileNameChannelsPart = GetAudioFileNameChannelsPart(selected 
+	// audioFileNameChannelsPart = GetAudioFileNameChannelsPart(selected)
+	audioFileNameChannelsPart := "20"
+	tgNameInput := "test"
 
 	// Нужно спросить имя трейлера и какой аудио стрим выбрать
 	bot.requestTRL(path.Base(srcPath))
@@ -508,7 +490,7 @@ func ProcessTrl(srcPath string, bot *tgBot, trlLock *sync.Mutex) {
 		"-af",
 		fmt.Sprintf("aresample=48000,atempo=25/(%s)", videoStream.RFrameRate),
 		path.Join(viper.GetString("path.edit.trailers_temp"),
-			tgNameInput+"_TRL"+"_AUDIORUS"+audioFileNameChannelsPart =+".m4a"),
+			tgNameInput+"_TRL"+"_AUDIORUS"+audioFileNameChannelsPart+".m4a"),
 	)
 
 	cmd.Stderr = os.Stderr
