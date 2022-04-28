@@ -1,0 +1,10 @@
+path:
+  buffer:
+    in: "/home/aakkulov/IN/"
+
+  in:
+    trailers: "/mnt/aakkulov/ROOT/IN/@TRAILERS"
+  
+  edit:
+    cache: "/mnt/aakkulov/ROOT/EDIT/@auto_ffmpeg_cache"
+    trailers_temp: "/mnt/aakkulov/ROOT/EDIT/@trailers_temp"
